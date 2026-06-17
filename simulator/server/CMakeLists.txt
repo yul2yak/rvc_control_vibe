@@ -25,3 +25,16 @@ target_link_libraries(rvc_simulator PRIVATE
     rvc_adapters
     httplib::httplib
 )
+
+add_executable(rvc_scenario_tests
+    scenario_test_main.cpp
+    scenario_runner.cpp
+    scenario_definitions.cpp
+    simulator_service.cpp
+    switchable_turn_strategy.cpp
+)
+target_include_directories(rvc_scenario_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(rvc_scenario_tests PRIVATE rvc_adapters)

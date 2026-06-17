@@ -12,6 +12,20 @@ let banner = null;
 
 const STEP_DELAY_MS = 700;
 const SCENARIO_PAUSE_MS = 1500;
+const MANUAL_AUTO_TICK_MS = 500;
+
+let cachedScenarios = null;
+let isAutoTestRunning = false;
+let manualAutoTickTimer = null;
+let manualTickInFlight = false;
+
+const SCENARIO_HINTS = {
+    forward_cleaning: "무장애물 직진",
+    front_obstacle: "좌회전 우선",
+    all_sides_blocked: "후진 후 회전",
+    dust_boost: "앞 칸 먼지 접근 후 흡입",
+    right_turn_obstacle: "우회전 고정",
+};
 
 function cellKey(x, y) {
     return `${x},${y}`;
@@ -90,22 +104,61 @@ function readSensorsFromForm() {
     };
 }
 
-function updateStatus(state) {
-    document.getElementById("motionState").textContent = state.motion_state;
-    document.getElementById("cleaningMode").textContent = state.cleaning_mode;
-    document.getElementById("lastMotion").textContent = state.last_motion;
-    document.getElementById("lastClean").textContent = state.last_clean;
+const MOTION_STATE_KO = {
+    Idle: "대기",
+    MovingForward: "전진",
+    Stopping: "정지",
+    Turning: "회전",
+    BackingUp: "후진",
+};
+
+const CLEANING_MODE_KO = {
+    Off: "꺼짐",
+    Normal: "일반",
+    Boost: "부스트",
+    Unknown: "알 수 없음",
+};
+
+const MOTION_COMMAND_KO = {
+    None: "없음",
+    MoveForward: "전진",
+    Stop: "정지",
+    TurnLeft: "좌회전",
+    TurnRight: "우회전",
+    MoveBackward: "후진",
+};
+
+const CLEANING_COMMAND_KO = {
+    None: "없음",
+    SetNormal: "일반 청소",
+    SetBoost: "부스트",
+    SetOff: "청소 끔",
+};
+
+function toKorean(value, table) {
+    return table[value] || value;
 }
 
-function applyCleaningEffect(cleanCommand) {
+function updateStatus(state) {
+    document.getElementById("motionState").textContent = toKorean(state.motion_state, MOTION_STATE_KO);
+    document.getElementById("cleaningMode").textContent = toKorean(state.cleaning_mode, CLEANING_MODE_KO);
+    document.getElementById("lastMotion").textContent = toKorean(state.last_motion, MOTION_COMMAND_KO);
+    document.getElementById("lastClean").textContent = toKorean(state.last_clean, CLEANING_COMMAND_KO);
+}
+
+function applyCleaningEffect(cleanCommand, previousCellKey) {
     if (cleanCommand === "SetBoost") {
         dustCells.delete(cellKey(robot.x, robot.y));
+        if (previousCellKey) {
+            dustCells.delete(previousCellKey);
+        }
     }
 }
 
 function applyTickResult(state) {
+    const previousCellKey = cellKey(robot.x, robot.y);
     applyMotion(state.last_motion);
-    applyCleaningEffect(state.last_clean);
+    applyCleaningEffect(state.last_clean, previousCellKey);
     updateStatus(state);
     syncCheckboxesFromGrid();
     draw();
@@ -261,14 +314,22 @@ function setupScenarioWorld(scenarioId) {
     }
 
     if (scenarioId === "dust_boost") {
-        dustCells.add(cellKey(2, row));
+        dustCells.add(cellKey(3, row));
+    }
+}
+
+function resetRobotForScenario(scenarioId) {
+    robot.x = 2;
+    robot.y = Math.floor(rows / 2);
+    robot.dir = 0;
+
+    if (scenarioId === "dust_boost") {
+        robot.x = 1;
     }
 }
 
 function resetRobot() {
-    robot.x = 2;
-    robot.y = Math.floor(rows / 2);
-    robot.dir = 0;
+    resetRobotForScenario("manual");
 }
 
 function showBanner(text, bgColor, durationMs) {
@@ -296,12 +357,52 @@ async function api(path, body) {
     return res.json();
 }
 
+function stopManualAutoTick() {
+    if (manualAutoTickTimer !== null) {
+        clearInterval(manualAutoTickTimer);
+        manualAutoTickTimer = null;
+    }
+}
+
+async function runManualTick() {
+    if (manualTickInFlight) {
+        return;
+    }
+
+    manualTickInFlight = true;
+    try {
+        syncCheckboxesFromGrid();
+        const sensors = readSensorsFromGrid();
+        const state = await api("/api/tick", sensors);
+        applyTickResult(state);
+    } catch (err) {
+        console.error(err);
+        stopManualAutoTick();
+    } finally {
+        manualTickInFlight = false;
+    }
+}
+
+function startManualAutoTick() {
+    stopManualAutoTick();
+    manualAutoTickTimer = setInterval(() => {
+        runManualTick();
+    }, MANUAL_AUTO_TICK_MS);
+}
+
 document.getElementById("btnStart").addEventListener("click", async () => {
+    stopManualAutoTick();
     const state = await api("/api/start");
     updateStatus(state);
+
+    if (isManualMode()) {
+        await runManualTick();
+        startManualAutoTick();
+    }
 });
 
 document.getElementById("btnReset").addEventListener("click", async () => {
+    stopManualAutoTick();
     await api("/api/reset");
     resetRobot();
     setupWorld();
@@ -316,31 +417,64 @@ document.getElementById("btnReset").addEventListener("click", async () => {
 });
 
 document.getElementById("btnTick").addEventListener("click", async () => {
-    const sensors = readSensorsFromForm();
-    const state = await api("/api/tick", sensors);
-    applyTickResult(state);
+    await runManualTick();
 });
 
-canvas.addEventListener("click", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / cellSize);
-    const y = Math.floor((e.clientY - rect.top) / cellSize);
-    const key = cellKey(x, y);
+function isManualMode() {
+    return !document.getElementById("manualPanel").classList.contains("hidden");
+}
 
-    if (e.shiftKey) {
-        if (dustCells.has(key)) {
-            dustCells.delete(key);
-        } else {
-            dustCells.add(key);
-        }
+function gridCoordsFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: Math.floor((e.clientX - rect.left) / cellSize),
+        y: Math.floor((e.clientY - rect.top) / cellSize),
+    };
+}
+
+function toggleObstacleAt(x, y) {
+    const key = cellKey(x, y);
+    if (obstacles.has(key)) {
+        obstacles.delete(key);
     } else {
-        if (obstacles.has(key)) {
-            obstacles.delete(key);
-        } else {
-            obstacles.add(key);
-        }
+        obstacles.add(key);
+    }
+}
+
+function toggleDustAt(x, y) {
+    const key = cellKey(x, y);
+    if (dustCells.has(key)) {
+        dustCells.delete(key);
+    } else {
+        dustCells.add(key);
+    }
+}
+
+canvas.addEventListener("click", (e) => {
+    if (!isManualMode()) {
+        return;
     }
 
+    const { x, y } = gridCoordsFromEvent(e);
+
+    if (e.shiftKey) {
+        toggleDustAt(x, y);
+    } else {
+        toggleObstacleAt(x, y);
+    }
+
+    syncCheckboxesFromGrid();
+    draw();
+});
+
+canvas.addEventListener("contextmenu", (e) => {
+    if (!isManualMode()) {
+        return;
+    }
+
+    e.preventDefault();
+    const { x, y } = gridCoordsFromEvent(e);
+    toggleDustAt(x, y);
     syncCheckboxesFromGrid();
     draw();
 });
@@ -355,6 +489,11 @@ function setMode(mode) {
     document.getElementById("autoPanel").classList.toggle("hidden", isManual);
     document.getElementById("btnModeManual").className = isManual ? "active" : "inactive";
     document.getElementById("btnModeAuto").className = isManual ? "inactive" : "active";
+
+    if (!isManual) {
+        stopManualAutoTick();
+        initAutoTestPanel();
+    }
 }
 
 function updateScenarioCard(scenarioId, scenarioResult) {
@@ -382,104 +521,174 @@ function updateScenarioCard(scenarioId, scenarioResult) {
     card.innerHTML = html;
 }
 
-async function runScenariosVisual() {
-    const btn = document.getElementById("btnRunScenarios");
+function setAutoTestRunning(running) {
+    isAutoTestRunning = running;
+    if (running) {
+        stopManualAutoTick();
+    }
+    document.getElementById("btnRunScenarios").disabled = running;
+    document.querySelectorAll(".btn-run-one").forEach((btn) => {
+        btn.disabled = running;
+    });
+}
+
+async function fetchScenarios() {
+    if (!cachedScenarios) {
+        const data = await fetch("/api/scenarios").then((res) => res.json());
+        cachedScenarios = data.scenarios;
+    }
+    return cachedScenarios;
+}
+
+function renderScenarioRunList(scenarios) {
+    const list = document.getElementById("scenarioRunList");
+    list.innerHTML = scenarios.map((scenario) => {
+        const hint = SCENARIO_HINTS[scenario.id] || "";
+        const label = hint ? `${scenario.name} — ${hint}` : scenario.name;
+        return `<div class="scenario-run-item">`
+            + `<span>${label}</span>`
+            + `<button type="button" class="secondary btn-run-one" data-id="${scenario.id}">실행</button>`
+            + `</div>`;
+    }).join("");
+
+    list.querySelectorAll(".btn-run-one").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            runScenariosVisual([btn.dataset.id]);
+        });
+    });
+}
+
+function ensureScenarioCards(scenarios, container) {
+    container.innerHTML = `<div class="test-summary">시나리오 실행 준비 중...</div>`;
+    for (const scenario of scenarios) {
+        container.innerHTML += `<div id="card-${scenario.id}" class="scenario-card">`
+            + `<div class="scenario-title">${scenario.name} 대기</div></div>`;
+    }
+}
+
+function updateSummaryHeader(container, passed, total) {
+    const summaryEl = container.querySelector(".test-summary");
+    if (!summaryEl) {
+        return;
+    }
+    const failed = total - passed;
+    summaryEl.className = `test-summary ${failed === 0 ? "all-pass" : "has-fail"}`;
+    summaryEl.textContent = `${passed} / ${total} 통과`;
+}
+
+async function runSingleScenarioVisual(scenario, options = {}) {
+    const { pauseAfter = true } = options;
+    const card = document.getElementById(`card-${scenario.id}`);
+    if (card) {
+        card.className = "scenario-card running";
+        card.innerHTML = `<div class="scenario-title">▶ ${scenario.name} 실행 중...</div>`;
+    }
+
+    setupScenarioWorld(scenario.id);
+    resetRobotForScenario(scenario.id);
+    draw();
+
+    await api("/api/reset");
+    await api("/api/start", { turn_strategy: scenario.turn_strategy });
+
+    const stepResults = [];
+    let passed = true;
+
+    for (let i = 0; i < scenario.steps.length; i++) {
+        const step = scenario.steps[i];
+        await sleep(STEP_DELAY_MS);
+
+        const tickState = await api("/api/tick", {
+            ...step.sensors,
+            timer_advance_ms: step.timer_advance_ms || 0,
+        });
+
+        const stepPassed = tickState.last_motion === step.expected_motion
+            && tickState.last_clean === step.expected_clean;
+
+        if (!stepPassed) {
+            passed = false;
+        }
+
+        applyTickResult(tickState);
+
+        stepResults.push({
+            step: i + 1,
+            expected_motion: step.expected_motion,
+            actual_motion: tickState.last_motion,
+            expected_clean: step.expected_clean,
+            actual_clean: tickState.last_clean,
+            passed: stepPassed,
+        });
+    }
+
+    const scenarioResult = {
+        id: scenario.id,
+        name: scenario.name,
+        passed,
+        message: passed ? "OK" : "검증 실패",
+        steps: stepResults,
+    };
+
+    updateScenarioCard(scenario.id, scenarioResult);
+    await showBanner(
+        passed ? `✓ ${scenario.name} 성공` : `✗ ${scenario.name} 실패`,
+        passed ? "#2e7d3288" : "#c6282888",
+        1200
+    );
+
+    if (pauseAfter) {
+        await sleep(SCENARIO_PAUSE_MS);
+    }
+
+    return scenarioResult;
+}
+
+async function runScenariosVisual(scenarioIds = null) {
+    if (isAutoTestRunning) {
+        return;
+    }
+
     const container = document.getElementById("testResults");
-    btn.disabled = true;
+    setAutoTestRunning(true);
 
     try {
-        const data = await fetch("/api/scenarios").then((res) => res.json());
-        const summary = {
-            total: data.scenarios.length,
-            passed: 0,
-            failed: 0,
-            scenarios: [],
-        };
+        const allScenarios = await fetchScenarios();
+        const scenarios = scenarioIds
+            ? allScenarios.filter((s) => scenarioIds.includes(s.id))
+            : allScenarios;
 
-        container.innerHTML = `<div class="test-summary">시나리오 실행 준비 중...</div>`;
-        for (const scenario of data.scenarios) {
-            container.innerHTML += `<div id="card-${scenario.id}" class="scenario-card running">`
-                + `<div class="scenario-title">▶ ${scenario.name} 대기</div></div>`;
+        if (scenarios.length === 0) {
+            container.innerHTML = `<div class="test-summary has-fail">시나리오를 찾을 수 없습니다.</div>`;
+            return;
         }
 
-        for (const scenario of data.scenarios) {
-            const card = document.getElementById(`card-${scenario.id}`);
-            if (card) {
-                card.className = "scenario-card running";
-                card.innerHTML = `<div class="scenario-title">▶ ${scenario.name} 실행 중...</div>`;
+        ensureScenarioCards(scenarios, container);
+
+        let passedCount = 0;
+        for (const scenario of scenarios) {
+            const result = await runSingleScenarioVisual(scenario, {
+                pauseAfter: scenarios.length > 1,
+            });
+            if (result.passed) {
+                passedCount += 1;
             }
-
-            setupScenarioWorld(scenario.id);
-            resetRobot();
-            draw();
-
-            await api("/api/reset");
-            await api("/api/start", { turn_strategy: scenario.turn_strategy });
-
-            const stepResults = [];
-            let passed = true;
-
-            for (let i = 0; i < scenario.steps.length; i++) {
-                const step = scenario.steps[i];
-                await sleep(STEP_DELAY_MS);
-
-                const tickState = await api("/api/tick", {
-                    ...step.sensors,
-                    timer_advance_ms: step.timer_advance_ms || 0,
-                });
-
-                const stepPassed = tickState.last_motion === step.expected_motion
-                    && tickState.last_clean === step.expected_clean;
-
-                if (!stepPassed) {
-                    passed = false;
-                }
-
-                applyTickResult(tickState);
-
-                stepResults.push({
-                    step: i + 1,
-                    expected_motion: step.expected_motion,
-                    actual_motion: tickState.last_motion,
-                    expected_clean: step.expected_clean,
-                    actual_clean: tickState.last_clean,
-                    passed: stepPassed,
-                });
-            }
-
-            const scenarioResult = {
-                id: scenario.id,
-                name: scenario.name,
-                passed,
-                message: passed ? "OK" : "검증 실패",
-                steps: stepResults,
-            };
-
-            if (passed) {
-                summary.passed += 1;
-            } else {
-                summary.failed += 1;
-            }
-            summary.scenarios.push(scenarioResult);
-
-            updateScenarioCard(scenario.id, scenarioResult);
-            await showBanner(
-                passed ? `✓ ${scenario.name} 성공` : `✗ ${scenario.name} 실패`,
-                passed ? "#2e7d3288" : "#c6282888",
-                1200
-            );
-            await sleep(SCENARIO_PAUSE_MS);
         }
 
-        const summaryEl = container.querySelector(".test-summary");
-        if (summaryEl) {
-            summaryEl.className = `test-summary ${summary.failed === 0 ? "all-pass" : "has-fail"}`;
-            summaryEl.textContent = `${summary.passed} / ${summary.total} 통과`;
-        }
+        updateSummaryHeader(container, passedCount, scenarios.length);
     } catch (err) {
         container.innerHTML = `<div class="test-summary has-fail">오류: ${err.message}</div>`;
     } finally {
-        btn.disabled = false;
+        setAutoTestRunning(false);
+    }
+}
+
+async function initAutoTestPanel() {
+    try {
+        const scenarios = await fetchScenarios();
+        renderScenarioRunList(scenarios);
+    } catch (err) {
+        document.getElementById("scenarioRunList").textContent = `시나리오 로드 실패: ${err.message}`;
     }
 }
 
@@ -487,5 +696,5 @@ document.getElementById("btnModeManual").addEventListener("click", () => setMode
 document.getElementById("btnModeAuto").addEventListener("click", () => setMode("auto"));
 
 document.getElementById("btnRunScenarios").addEventListener("click", () => {
-    runScenariosVisual();
+    runScenariosVisual(null);
 });

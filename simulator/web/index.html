@@ -175,6 +175,27 @@
             font-size: 0.8rem;
             color: #9aa0a6;
         }
+
+        .scenario-run-list {
+            margin-bottom: 0.75rem;
+        }
+
+        .scenario-run-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+            font-size: 0.85rem;
+        }
+
+        .scenario-run-item button {
+            width: auto;
+            margin-bottom: 0;
+            padding: 0.35rem 0.6rem;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -188,6 +209,7 @@
                 <span><span class="swatch" style="background:var(--robot)"></span>로봇</span>
                 <span><span class="swatch" style="background:var(--obstacle)"></span>장애물</span>
                 <span><span class="swatch" style="background:var(--dust)"></span>먼지</span>
+                <span style="color:#9aa0a6;font-size:0.8rem">좌클릭: 장애물 · 우클릭: 먼지</span>
             </div>
         </div>
         <aside class="panel">
@@ -198,11 +220,11 @@
 
             <div id="manualPanel">
                 <h2>제어</h2>
-                <button id="btnStart">시작</button>
-                <button id="btnTick" class="secondary">Tick (1 step)</button>
+                <button id="btnStart">시작 (0.5초/칸)</button>
+                <button id="btnTick" class="secondary">Tick (1회)</button>
                 <button id="btnReset" class="secondary">리셋</button>
 
-                <h2>센서 (다음 Tick)</h2>
+                <h2>센서 (그리드 기준)</h2>
                 <label><input type="checkbox" id="front"> 전방 장애물</label>
                 <label><input type="checkbox" id="left"> 좌측 장애물</label>
                 <label><input type="checkbox" id="right"> 우측 장애물</label>
@@ -210,25 +232,19 @@
 
                 <h2>상태</h2>
                 <dl class="status">
-                    <dt>Motion</dt><dd id="motionState">-</dd>
-                    <dt>Cleaning</dt><dd id="cleaningMode">-</dd>
-                    <dt>Last Motion</dt><dd id="lastMotion">-</dd>
-                    <dt>Last Clean</dt><dd id="lastClean">-</dd>
+                    <dt>동작</dt><dd id="motionState">-</dd>
+                    <dt>청소</dt><dd id="cleaningMode">-</dd>
+                    <dt>마지막 동작</dt><dd id="lastMotion">-</dd>
+                    <dt>마지막 청소</dt><dd id="lastClean">-</dd>
                 </dl>
             </div>
 
             <div id="autoPanel" class="hidden">
                 <h2>시나리오 자동 테스트</h2>
                 <p style="font-size:0.85rem;color:#9aa0a6;margin:0 0 0.75rem">
-                    그리드에서 로봇이 한 칸씩 움직이며 시나리오를 순서대로 검증합니다.
+                    시나리오별로 실행하거나 전체를 순서대로 검증할 수 있습니다.
                 </p>
-                <ul class="scenario-list">
-                    <li>• 직진 청소</li>
-                    <li>• 전방 장애물 회피 — <strong>좌회전 우선</strong> 전략</li>
-                    <li>• 전/좌/우 막힘 — 후진 후 회전</li>
-                    <li>• 먼지 흡입 및 부스트 — 부스트 시 먼지 제거</li>
-                    <li>• 우회전 전략 — 좌측 막힘, <strong>우회전 고정</strong></li>
-                </ul>
+                <div id="scenarioRunList" class="scenario-run-list"></div>
                 <button id="btnRunScenarios">시나리오 전체 실행</button>
                 <div id="testResults" class="test-results"></div>
             </div>

@@ -127,6 +127,7 @@ const std::vector<ScenarioDefinition>& GetScenarioDefinitions()
             "먼지 흡입 및 부스트",
             ScenarioTurnStrategy::PreferLeft,
             {
+                {ClearSensors(), domain::MotionCommand::MoveForward, domain::CleaningCommand::SetNormal},
                 {DustySensors(), domain::MotionCommand::MoveForward, domain::CleaningCommand::SetBoost},
                 {ClearSensors(), domain::MotionCommand::MoveForward, domain::CleaningCommand::SetNormal,
                  std::chrono::seconds(3)},
