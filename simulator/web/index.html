@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RVC Simulator</title>
+    <style>
+        :root {
+            --bg: #1a1d23;
+            --panel: #252a33;
+            --accent: #4fc3f7;
+            --text: #e8eaed;
+            --grid: #3a4250;
+            --robot: #66bb6a;
+            --obstacle: #ef5350;
+            --dust: #ffb74d;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 1rem 1.5rem;
+            background: var(--panel);
+            border-bottom: 1px solid #333;
+        }
+
+        h1 { margin: 0; font-size: 1.25rem; }
+
+        main {
+            display: grid;
+            grid-template-columns: 1fr 280px;
+            gap: 1rem;
+            padding: 1rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        canvas {
+            background: var(--panel);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 720px;
+            border: 1px solid #333;
+        }
+
+        .panel {
+            background: var(--panel);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #333;
+        }
+
+        .panel h2 {
+            margin: 0 0 0.75rem;
+            font-size: 0.95rem;
+            color: var(--accent);
+        }
+
+        .status dt { color: #9aa0a6; font-size: 0.8rem; }
+        .status dd { margin: 0 0 0.5rem; font-weight: 600; }
+
+        button {
+            width: 100%;
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #111;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button.secondary { background: #5c6370; color: var(--text); }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+            font-size: 0.9rem;
+        }
+
+        .legend {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.75rem;
+            font-size: 0.8rem;
+        }
+
+        .swatch {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 4px;
+        }
+
+        .mode-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .mode-tabs button {
+            width: auto;
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .mode-tabs button.active {
+            background: var(--accent);
+            color: #111;
+        }
+
+        .mode-tabs button.inactive {
+            background: #3a4250;
+            color: var(--text);
+        }
+
+        .hidden { display: none; }
+
+        .scenario-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 0.75rem;
+            font-size: 0.85rem;
+            color: #9aa0a6;
+        }
+
+        .scenario-list li {
+            margin-bottom: 0.25rem;
+        }
+
+        .test-results {
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .test-summary {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .test-summary.all-pass { color: #66bb6a; }
+        .test-summary.has-fail { color: #ef5350; }
+
+        .scenario-card {
+            border: 1px solid #3a4250;
+            border-radius: 6px;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .scenario-card.pass { border-color: #66bb6a55; }
+        .scenario-card.fail { border-color: #ef535055; }
+        .scenario-card.running { border-color: #4fc3f788; }
+
+        .scenario-title {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .scenario-steps {
+            font-size: 0.8rem;
+            color: #9aa0a6;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>로봇청소기 Control SW — Web Simulator</h1>
+    </header>
+    <main>
+        <div>
+            <canvas id="grid" width="720" height="480"></canvas>
+            <div class="legend">
+                <span><span class="swatch" style="background:var(--robot)"></span>로봇</span>
+                <span><span class="swatch" style="background:var(--obstacle)"></span>장애물</span>
+                <span><span class="swatch" style="background:var(--dust)"></span>먼지</span>
+            </div>
+        </div>
+        <aside class="panel">
+            <div class="mode-tabs">
+                <button id="btnModeManual" class="active">수동 모드</button>
+                <button id="btnModeAuto" class="inactive">자동 테스트</button>
+            </div>
+
+            <div id="manualPanel">
+                <h2>제어</h2>
+                <button id="btnStart">시작</button>
+                <button id="btnTick" class="secondary">Tick (1 step)</button>
+                <button id="btnReset" class="secondary">리셋</button>
+
+                <h2>센서 (다음 Tick)</h2>
+                <label><input type="checkbox" id="front"> 전방 장애물</label>
+                <label><input type="checkbox" id="left"> 좌측 장애물</label>
+                <label><input type="checkbox" id="right"> 우측 장애물</label>
+                <label><input type="checkbox" id="dust"> 먼지 감지</label>
+
+                <h2>상태</h2>
+                <dl class="status">
+                    <dt>Motion</dt><dd id="motionState">-</dd>
+                    <dt>Cleaning</dt><dd id="cleaningMode">-</dd>
+                    <dt>Last Motion</dt><dd id="lastMotion">-</dd>
+                    <dt>Last Clean</dt><dd id="lastClean">-</dd>
+                </dl>
+            </div>
+
+            <div id="autoPanel" class="hidden">
+                <h2>시나리오 자동 테스트</h2>
+                <p style="font-size:0.85rem;color:#9aa0a6;margin:0 0 0.75rem">
+                    그리드에서 로봇이 한 칸씩 움직이며 시나리오를 순서대로 검증합니다.
+                </p>
+                <ul class="scenario-list">
+                    <li>• 직진 청소</li>
+                    <li>• 전방 장애물 회피 — <strong>좌회전 우선</strong> 전략</li>
+                    <li>• 전/좌/우 막힘 — 후진 후 회전</li>
+                    <li>• 먼지 흡입 및 부스트 — 부스트 시 먼지 제거</li>
+                    <li>• 우회전 전략 — 좌측 막힘, <strong>우회전 고정</strong></li>
+                </ul>
+                <button id="btnRunScenarios">시나리오 전체 실행</button>
+                <div id="testResults" class="test-results"></div>
+            </div>
+        </aside>
+    </main>
+    <script src="app.js"></script>
+</body>
+</html>
