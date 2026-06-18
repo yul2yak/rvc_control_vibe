@@ -47,6 +47,23 @@ MotionCommand CleaningStateMachine::TurnMotionCommand() const
                                                          : MotionCommand::TurnRight;
 }
 
+CleaningCommand CleaningStateMachine::ResolveCleaningDuringManeuver(const TickContext& context)
+{
+    if (context.sensors.dust_detected)
+    {
+        cleaning_mode_ = CleaningMode::Boost;
+        return CleaningCommand::SetBoost;
+    }
+
+    if (cleaning_mode_ == CleaningMode::Boost && !context.boost_timer_expired)
+    {
+        return CleaningCommand::SetBoost;
+    }
+
+    cleaning_mode_ = CleaningMode::Off;
+    return CleaningCommand::SetOff;
+}
+
 TickResult CleaningStateMachine::Tick(const TickContext& context)
 {
     switch (motion_state_)
@@ -73,26 +90,24 @@ TickResult CleaningStateMachine::HandleMovingForward(const TickContext& context)
     if (AllSidesBlocked(sensors))
     {
         motion_state_ = RobotMotionState::BackingUp;
-        cleaning_mode_ = CleaningMode::Off;
 
         TickResult result;
         result.next_motion_state = motion_state_;
-        result.next_cleaning_mode = cleaning_mode_;
         result.motion = MotionCommand::MoveBackward;
-        result.clean = CleaningCommand::SetOff;
+        result.clean = ResolveCleaningDuringManeuver(context);
+        result.next_cleaning_mode = cleaning_mode_;
         return result;
     }
 
     if (FrontBlocked(sensors))
     {
         motion_state_ = RobotMotionState::Stopping;
-        cleaning_mode_ = CleaningMode::Off;
 
         TickResult result;
         result.next_motion_state = motion_state_;
-        result.next_cleaning_mode = cleaning_mode_;
         result.motion = MotionCommand::Stop;
-        result.clean = CleaningCommand::SetOff;
+        result.clean = ResolveCleaningDuringManeuver(context);
+        result.next_cleaning_mode = cleaning_mode_;
         return result;
     }
 
@@ -125,9 +140,9 @@ TickResult CleaningStateMachine::HandleStopping(const TickContext& context)
 
     TickResult result;
     result.next_motion_state = motion_state_;
-    result.next_cleaning_mode = cleaning_mode_;
     result.motion = TurnMotionCommand();
-    result.clean = CleaningCommand::SetOff;
+    result.clean = ResolveCleaningDuringManeuver(context);
+    result.next_cleaning_mode = cleaning_mode_;
     return result;
 }
 
@@ -138,9 +153,9 @@ TickResult CleaningStateMachine::HandleBackingUp(const TickContext& context)
 
     TickResult result;
     result.next_motion_state = motion_state_;
-    result.next_cleaning_mode = cleaning_mode_;
     result.motion = TurnMotionCommand();
-    result.clean = CleaningCommand::SetOff;
+    result.clean = ResolveCleaningDuringManeuver(context);
+    result.next_cleaning_mode = cleaning_mode_;
     return result;
 }
 
@@ -149,21 +164,31 @@ TickResult CleaningStateMachine::HandleTurning(const TickContext& context)
     if (!FrontBlocked(context.sensors))
     {
         motion_state_ = RobotMotionState::MovingForward;
-        cleaning_mode_ = CleaningMode::Normal;
 
         TickResult result;
         result.next_motion_state = motion_state_;
-        result.next_cleaning_mode = cleaning_mode_;
         result.motion = MotionCommand::MoveForward;
-        result.clean = CleaningCommand::SetNormal;
+
+        if (context.sensors.dust_detected)
+        {
+            cleaning_mode_ = CleaningMode::Boost;
+            result.next_cleaning_mode = cleaning_mode_;
+            result.clean = CleaningCommand::SetBoost;
+        }
+        else
+        {
+            cleaning_mode_ = CleaningMode::Normal;
+            result.next_cleaning_mode = cleaning_mode_;
+            result.clean = CleaningCommand::SetNormal;
+        }
         return result;
     }
 
     TickResult result;
     result.next_motion_state = RobotMotionState::Turning;
-    result.next_cleaning_mode = cleaning_mode_;
     result.motion = TurnMotionCommand();
-    result.clean = CleaningCommand::SetOff;
+    result.clean = ResolveCleaningDuringManeuver(context);
+    result.next_cleaning_mode = cleaning_mode_;
     return result;
 }
 

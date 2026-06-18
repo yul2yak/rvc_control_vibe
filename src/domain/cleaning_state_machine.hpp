@@ -44,6 +44,7 @@ private:
     TickResult HandleBackingUp(const TickContext& context);
     TickResult HandleTurning(const TickContext& context);
     TickResult ApplyCleaningBoost(const TickContext& context, TickResult result);
+    CleaningCommand ResolveCleaningDuringManeuver(const TickContext& context);
 
     RobotMotionState motion_state_;
     CleaningMode cleaning_mode_;
